@@ -256,7 +256,8 @@ function flyHour(h) {
   if (!h) return 'na';
   const p = h.p ?? 0, w = h.w ?? 0, g = h.g ?? 0;
   // rain (or a likely chance of it) overrides wind, and shows at night too
-  if (p >= s.rain || (h.prob != null && h.prob >= s.prob)) return 'rain';
+  // weather codes 51+ are drizzle/rain/snow/showers/thunder: the model says it's wet even if the amount rounds to ~0
+  if (p >= s.rain || (h.prob != null && h.prob >= s.prob) || (h.code ?? 0) >= 51) return 'rain';
   if (s.daylight && h.isDay === 0) return 'na';
   if (w > s.wind || g > s.gust) return 'bad';
   if (w > s.wind * 0.8 || g > s.gust * 0.8 || p > 0) return 'meh';
