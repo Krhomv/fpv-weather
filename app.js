@@ -226,20 +226,21 @@ function flyHour(h) {
   if (!h) return 'na';
   if (s.daylight && h.isDay === 0) return 'na';
   const p = h.p ?? 0, w = h.w ?? 0, g = h.g ?? 0;
-  if (w > s.wind || g > s.gust || p >= s.rain) return 'bad';
+  if (p >= s.rain) return 'rain'; // rain overrides wind: no point checking gusts in the rain
+  if (w > s.wind || g > s.gust) return 'bad';
   if ((h.prob != null && h.prob >= s.prob) || w > s.wind * 0.8 || g > s.gust * 0.8 || p > 0) return 'meh';
   return 'good';
 }
 function flyDay(data, day) {
   const hrs = data.hourly.filter((h) => h.t > day.t && h.t <= day.t + 86400 + 1800);
-  let good = 0, meh = 0, bad = 0, counted = 0;
+  let good = 0, meh = 0, bad = 0, rain = 0, counted = 0;
   for (const h of hrs) {
     const v = flyHour(h);
     if (v === 'na') continue;
     counted++;
-    if (v === 'good') good++; else if (v === 'meh') meh++; else bad++;
+    if (v === 'good') good++; else if (v === 'meh') meh++; else if (v === 'rain') rain++; else bad++;
   }
-  let v = 'bad';
+  let v = rain >= bad ? 'rain' : 'bad';
   if (!counted) v = 'na';
   else if (good >= 3) v = 'good';
   else if (good + meh >= 2) v = 'meh';
@@ -249,6 +250,7 @@ const VERDICT = {
   good: ['v-good', '✓ Good to fly'],
   meh: ['v-meh', '~ Marginal'],
   bad: ['v-bad', '✕ No fly'],
+  rain: ['v-rain', '☂ Rain'],
   na: ['v-na', '☾ Night'],
 };
 function whyNot(h) {
@@ -524,7 +526,7 @@ function renderNowWind() {
     const nxt = d.hourly.find((x) => x.t > t0 + 3600 && x.t < t0 + 48 * 3600 && flyHour(x) === 'good');
     extra = nxt ? `Next good window from ${fmt(nxt.t - 3600, d.tz, { weekday: 'short', hour: 'numeric' })}` : 'No good window in the next 48 h';
   }
-  const why = v === 'bad' || v === 'meh' ? whyNot(cur) : '';
+  const why = v !== 'good' ? whyNot(cur) : '';
   $('#nowWind').innerHTML = `
     <div class="card-h">Wind now <span class="verdict ${cls}">${label}</span></div>
     <div class="wind-row">
@@ -630,7 +632,7 @@ function renderTimeline(box, d, lat, lon) {
       const ws = hrs.map((h) => h.w ?? 0), gs = hrs.map((h) => h.g ?? 0);
       const rainy = hrs.filter((h) => (h.p ?? 0) >= 0.1).map((h) => h.code ?? 0);
       const fly = hrs.map(flyHour);
-      const flyV = fly.includes('bad') ? 'bad' : fly.includes('meh') ? 'meh' : fly.every((v) => v === 'na') ? 'na' : 'good';
+      const flyV = fly.includes('rain') ? 'rain' : fly.includes('bad') ? 'bad' : fly.includes('meh') ? 'meh' : fly.every((v) => v === 'na') ? 'na' : 'good';
       cols.push({
         s0, hrs, sum, flyV,
         code: rainy.length ? Math.max(...rainy) : mid.code, isDay: mid.isDay,
@@ -755,7 +757,7 @@ async function renderSpots() {
       const today = dayKey(t0, d.tz);
       const days = d.daily.filter((x) => x.t >= d.daily.find((y) => dayKey(y.t, d.tz) === today)?.t).slice(0, 7);
       const dd = $(`[data-days="${s.id}"]`);
-      if (dd) dd.innerHTML = days.map((x) => `<i title="${fmt(x.t, d.tz, { weekday: 'short' })}" style="background:var(--${{ good: 'good', meh: 'meh', bad: 'bad', na: 'line' }[flyDay(d, x).v]})"></i>`).join('');
+      if (dd) dd.innerHTML = days.map((x) => `<i title="${fmt(x.t, d.tz, { weekday: 'short' })}" style="background:var(--${{ good: 'good', meh: 'meh', bad: 'bad', rain: 'rain', na: 'line' }[flyDay(d, x).v]})"></i>`).join('');
     }).catch(() => { const st = $(`[data-stats="${s.id}"]`); if (st) st.innerHTML = '<span class="muted">Offline</span>'; });
   }
 }
@@ -855,7 +857,7 @@ function drawHourly(box, hrs, tz, colW = 16) {
   }
   svg.append(el('line', { x1: L, x2: W - R, y1: bottom, y2: bottom, stroke: css('--line') }));
   // fly strip + hour labels
-  const colors = { good: css('--good'), meh: css('--meh'), bad: css('--bad'), na: css('--card2') };
+  const colors = { good: css('--good'), meh: css('--meh'), bad: css('--bad'), rain: css('--rain'), na: css('--card2') };
   hrs.forEach((h, i) => {
     svg.append(el('rect', { x: x0(i) + 0.5, y: bottom + 4, width: cw - 1, height: 7, rx: 1.5, fill: colors[flyHour(h)] }));
     const start = h.t - 3600;
@@ -892,7 +894,7 @@ function drawDaily(box, d) {
     svg.append(el('text', { x: X + cw / 2, y: bottom + 14, 'text-anchor': 'middle', class: isToday ? 'lbl-strong' : '' }, isToday ? 'Today' : fmt(x.t, tz, { weekday: 'short' })));
     svg.append(el('text', { x: X + cw / 2, y: bottom + 26, 'text-anchor': 'middle' }, fmt(x.t, tz, { day: 'numeric', month: 'numeric' })));
     const fv = flyDay(d, x).v;
-    svg.append(el('circle', { cx: X + cw / 2, cy: bottom + 37, r: 4, fill: { good: css('--good'), meh: css('--meh'), bad: css('--bad'), na: css('--line') }[fv] }));
+    svg.append(el('circle', { cx: X + cw / 2, cy: bottom + 37, r: 4, fill: { good: css('--good'), meh: css('--meh'), bad: css('--bad'), rain: css('--rain'), na: css('--line') }[fv] }));
   });
   const pts = (key) => days.map((x, i) => (x[key] == null ? null : [L + i * cw + cw / 2, wy(x[key])])).filter(Boolean);
   svg.append(el('line', { x1: L, x2: W - R, y1: wy(s.gust), y2: wy(s.gust), stroke: css('--gust'), 'stroke-dasharray': '2 5', opacity: 0.5 }));

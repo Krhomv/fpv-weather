@@ -91,7 +91,7 @@ main { padding: 12px 12px calc(var(--nav-h) + var(--safe-b) + 16px); max-width: 
 .sw-prob { background: var(--prob); height: 2px; vertical-align: 3px; }
 .sw-wind { background: var(--wind); height: 3px; vertical-align: 3px; }
 .sw-gust { background: var(--gust); height: 3px; vertical-align: 3px; }
-.sw-fly { background: linear-gradient(90deg, var(--good) 33%, var(--meh) 33% 66%, var(--bad) 66%); }
+.sw-fly { background: linear-gradient(90deg, var(--good) 25%, var(--meh) 25% 50%, var(--bad) 50% 75%, var(--rain) 75%); }
 
 /* wind card */
 .wind-row { display: flex; align-items: center; gap: 14px; }
@@ -101,6 +101,7 @@ main { padding: 12px 12px calc(var(--nav-h) + var(--safe-b) + 16px); max-width: 
 .v-good { background: rgba(63,185,80,.16); color: var(--good); }
 .v-meh { background: rgba(210,153,34,.16); color: var(--meh); }
 .v-bad { background: rgba(248,81,73,.16); color: var(--bad); }
+.v-rain { background: rgba(59,140,255,.18); color: #6aa8ff; }
 .v-na { background: var(--card2); color: var(--muted); }
 
 /* hour strip */
@@ -148,7 +149,7 @@ main { padding: 12px 12px calc(var(--nav-h) + var(--safe-b) + 16px); max-width: 
 .day-bars .r { color: var(--rain); }
 .day-bars .w { color: var(--wind); }
 .dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
-.dot.good { background: var(--good); } .dot.meh { background: var(--meh); } .dot.bad { background: var(--bad); } .dot.na { background: var(--line); }
+.dot.good { background: var(--good); } .dot.meh { background: var(--meh); } .dot.bad { background: var(--bad); } .dot.rain { background: var(--rain); } .dot.na { background: var(--line); }
 .day-more { padding: 0 14px 12px; }
 
 .row-btns { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
@@ -240,7 +241,7 @@ main { padding: 12px 12px calc(var(--nav-h) + var(--safe-b) + 16px); max-width: 
 .tl-bars i.night { background: rgba(0,0,0,.35); }
 .tl-bars b { width: 50%; background: var(--rain); border-radius: 2px 2px 0 0; }
 .tl-fly { display: inline-block; width: 80%; height: 6px; border-radius: 3px; background: var(--line); }
-.tl-fly.good { background: var(--good); } .tl-fly.meh { background: var(--meh); } .tl-fly.bad { background: var(--bad); }
+.tl-fly.good { background: var(--good); } .tl-fly.meh { background: var(--meh); } .tl-fly.bad { background: var(--bad); } .tl-fly.rain { background: var(--rain); }
 .tl-map { padding: 0 2px; }
 .mini { width: 100%; max-width: 44px; aspect-ratio: 1; border-radius: 8px; display: block; margin: 0 auto; border: 1px solid #556070; }
 .tl-key { display: flex; align-items: center; gap: 4px; margin-top: 10px; flex-wrap: wrap; }
