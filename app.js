@@ -16,6 +16,7 @@ const LS = {
   del(k) { try { localStorage.removeItem(k); } catch {} },
 };
 
+const APP_VERSION = '2026-11-03 · 9';
 const DEFAULT_SETTINGS = { unit: 'kmh', wind: 25, gust: 35, rain: 0.2, prob: 60, daylight: true };
 const state = {
   settings: { ...DEFAULT_SETTINGS, ...LS.get('fpvw:settings', {}) },
@@ -279,6 +280,14 @@ function flyDay(data, day) {
   else if (good + meh >= 2) v = 'meh';
   return { v, good, meh, bad, hrs };
 }
+/* a day as a little bar of its (daylight) hours, so "rain this morning, fine this afternoon" is visible */
+function dayStripe(data, day) {
+  const hrs = flyDay(data, day).hrs.filter((h) => !(state.settings.daylight && h.isDay === 0));
+  if (!hrs.length) return 'var(--line)';
+  const col = { good: 'var(--good)', meh: 'var(--meh)', bad: 'var(--bad)', rain: 'var(--rain)', na: 'var(--line)' };
+  const n = hrs.length;
+  return `linear-gradient(90deg, ${hrs.map((h, i) => `${col[flyHour(h)]} ${(i / n) * 100}% ${((i + 1) / n) * 100}%`).join(', ')})`;
+}
 const VERDICT = {
   good: ['v-good', '✓ Good to fly'],
   meh: ['v-meh', '~ Marginal'],
@@ -460,7 +469,7 @@ function renderNow() {
   $('#heroIcon').textContent = icon;
   $('#heroTitle').textContent = title;
   $('#heroSub').textContent = sub + (d.stale ? ' · offline data' : '');
-  $('#updated').textContent = `Updated ${hhmm(d.fetched, Intl.DateTimeFormat().resolvedOptions().timeZone)}`;
+  $('#updated').textContent = `v${APP_VERSION} · Updated ${hhmm(d.fetched, Intl.DateTimeFormat().resolvedOptions().timeZone)}`;
 
   drawNowChart();
   renderNowWind();
@@ -690,7 +699,7 @@ function renderTimeline(box, d, lat, lon) {
 
     box.innerHTML = `
       <div class="card-h">Day timeline <span class="muted small">rain map = ${GRID_KM * (GRID_N - 1) / 2 + 2} km around</span></div>
-      <div class="tl-days">${days.map((x, i) => `<button class="${i === st.day ? 'on' : ''}" data-i="${i}">${i === 0 ? 'Today' : fmt(x.t, tz, { weekday: 'short' })}<span>${fmt(x.t, tz, { day: 'numeric' })}</span><i class="dot ${flyDay(d, x).v}"></i></button>`).join('')}</div>
+      <div class="tl-days">${days.map((x, i) => `<button class="${i === st.day ? 'on' : ''}" data-i="${i}">${i === 0 ? 'Today' : fmt(x.t, tz, { weekday: 'short' })}<span>${fmt(x.t, tz, { day: 'numeric' })}</span><i class="daybar" style="background:${dayStripe(d, x)}"></i></button>`).join('')}</div>
       <div class="tl-wrap"><div class="tl" style="--n:${n}">
         <div class="tl-l"></div>${cols.map((c, i) => `<div class="tl-c tl-time ${i === nowCol ? 'now' : ''}">${fmt(c.s0, tz, { hour: '2-digit', hourCycle: 'h23' })}</div>`).join('')}
         <div class="tl-l"></div><div class="tl-sky" style="grid-column: span ${n}; background: linear-gradient(90deg, ${skyGrad})">${cols.map((c) => `<span>${wxIcon(c.code, c.isDay)}</span>`).join('')}</div>
@@ -792,7 +801,7 @@ async function renderSpots() {
       const today = dayKey(t0, d.tz);
       const days = d.daily.filter((x) => x.t >= d.daily.find((y) => dayKey(y.t, d.tz) === today)?.t).slice(0, 7);
       const dd = $(`[data-days="${s.id}"]`);
-      if (dd) dd.innerHTML = days.map((x) => `<i title="${fmt(x.t, d.tz, { weekday: 'short' })}" style="background:var(--${{ good: 'good', meh: 'meh', bad: 'bad', rain: 'rain', na: 'line' }[flyDay(d, x).v]})"></i>`).join('');
+      if (dd) dd.innerHTML = days.map((x) => `<i title="${fmt(x.t, d.tz, { weekday: 'short' })}" style="background:${dayStripe(d, x)}"></i>`).join('');
     }).catch(() => { const st = $(`[data-stats="${s.id}"]`); if (st) st.innerHTML = '<span class="muted">Offline</span>'; });
   }
 }
