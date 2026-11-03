@@ -1,7 +1,7 @@
 {
   "name": "FPV Weather",
   "short_name": "FPV Weather",
-  "description": "Rain now, wind and gusts at your FPV spots, and rain radar.",
+  "description": "Rain now, wind and gusts at your FPV spots, and rain maps around each spot.",
   "start_url": "./#now",
   "scope": "./",
   "display": "standalone",

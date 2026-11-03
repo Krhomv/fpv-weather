@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>FPV Weather</title>
-  <meta name="description" content="Rain now, wind and gusts at your FPV spots, and live rain radar.">
+  <meta name="description" content="Rain now, wind and gusts at your FPV spots, and rain maps around each spot.">
   <meta name="theme-color" content="#0d1117">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -53,11 +53,8 @@
 
       <div class="card" id="nowWind"></div>
 
-      <div class="card">
-        <div class="card-h">Next hours <span class="muted small">tap a spot for 3 weeks</span></div>
-        <div class="hstrip" id="hourStrip"></div>
-      </div>
-      <div class="foot muted small">Data: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> · Radar: <a href="https://www.rainviewer.com/" target="_blank" rel="noopener">RainViewer</a> · <span id="updated"></span></div>
+      <div class="card tl-card" id="nowTimeline"></div>
+      <div class="foot muted small">Data: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> · <span id="updated"></span></div>
     </section>
 
     <!-- SPOTS -->
@@ -80,6 +77,7 @@
         <button class="icon-btn edit" id="editSpotBtn" aria-label="Edit spot">✎</button>
       </div>
       <div class="card" id="dToday"></div>
+      <div class="card tl-card" id="dTimeline"></div>
       <div class="card">
         <div class="card-h">Next 48 hours</div>
         <div class="chart scroll" id="d48"></div>
@@ -104,27 +102,15 @@
         <div id="dayList"></div>
       </div>
       <div class="row-btns">
-        <button class="btn" id="showOnRadarBtn">Show on radar</button>
         <button class="btn" id="useAsNowBtn">Use on Now tab</button>
       </div>
     </section>
 
-    <!-- RADAR -->
-    <section class="view" id="view-radar">
-      <div id="radarMap"></div>
-      <div class="radar-bar">
-        <button class="icon-btn" id="radarPlay" aria-label="Play">▶</button>
-        <input type="range" id="radarSlider" min="0" max="0" value="0" aria-label="Radar time">
-        <div class="radar-time" id="radarTime">--:--</div>
-      </div>
-      <div class="radar-hint" id="radarHint">Tap the map to add a spot there</div>
-    </section>
   </main>
 
   <nav class="tabs">
     <button data-view="now" class="on"><span>☂</span>Now</button>
     <button data-view="spots"><span>⌖</span>Spots</button>
-    <button data-view="radar"><span>◎</span>Radar</button>
   </nav>
 
   <!-- Place picker sheet -->
@@ -167,6 +153,21 @@
         <button class="btn" data-close>Cancel</button>
         <button class="btn primary" id="spotSave">Save</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Rain map -->
+  <div class="sheet" id="rainSheet" hidden>
+    <div class="sheet-body">
+      <div class="sheet-h">Rain around the spot</div>
+      <div id="rainMap"></div>
+      <div class="rain-nav">
+        <button class="btn" id="rainPrev" aria-label="Earlier">‹ 3 h</button>
+        <div id="rainTime"></div>
+        <button class="btn" id="rainNext" aria-label="Later">3 h ›</button>
+      </div>
+      <div class="muted small">Forecast rain over 3 hours, on a 6 km grid. Light blue is a trace, purple is heavy.</div>
+      <button class="btn wide" data-close>Close</button>
     </div>
   </div>
 

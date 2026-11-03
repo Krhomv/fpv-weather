@@ -1,5 +1,5 @@
-/* FPV Weather — rain now, wind at your spots, rain radar.
-   Data: Open-Meteo (forecast + geocoding), RainViewer (radar), BigDataCloud (reverse geocoding).
+/* FPV Weather — rain now, wind at your spots, rain maps around each spot.
+   Data: Open-Meteo (forecast, grid of points for the rain maps, geocoding), BigDataCloud (reverse geocoding).
    Everything is stored on the device (localStorage + IndexedDB for photos). */
 'use strict';
 
@@ -86,7 +86,7 @@ function wxIcon(code, isDay = 1) {
   if (code == null) return '·';
   if (code === 0) return isDay ? '☀️' : '🌙';
   if (code === 1) return isDay ? '🌤️' : '🌙';
-  if (code === 2) return '⛅';
+  if (code === 2) return isDay ? '⛅' : '☁️';
   if (code === 3) return '☁️';
   if (code === 45 || code === 48) return '🌫️';
   if (code >= 51 && code <= 57) return '🌦️';
@@ -126,14 +126,15 @@ async function getWeather(lat, lon, force = false) {
     current: 'precipitation,weather_code,wind_speed_10m,wind_gusts_10m,wind_direction_10m,temperature_2m,is_day',
     minutely_15: 'precipitation',
     forecast_minutely_15: '104', past_minutely_15: '4',
-    hourly: 'precipitation,precipitation_probability,weather_code,wind_speed_10m,wind_gusts_10m,wind_direction_10m,temperature_2m,is_day',
+    hourly: 'precipitation,precipitation_probability,weather_code,wind_speed_10m,wind_gusts_10m,wind_direction_10m,temperature_2m,apparent_temperature,is_day',
     daily: 'weather_code,precipitation_sum,precipitation_probability_max,precipitation_hours,wind_speed_10m_max,wind_gusts_10m_max,wind_direction_10m_dominant,temperature_2m_max,temperature_2m_min,sunrise,sunset',
     past_days: '7', forecast_days: '16',
   });
   try {
-    const r = await fetch(`${API}?${p}`);
+    const [r, past] = await Promise.all([fetch(`${API}?${p}`), getPastWeek(lat, lon)]);
     if (!r.ok) throw new Error(`Open-Meteo ${r.status}`);
     const data = normalize(await r.json());
+    if (past) mergePast(data, past);
     mem.set(key, data);
     if (!LS.set('fpvw:wx:' + key, data)) pruneWxCache();
     return data;
@@ -141,6 +142,42 @@ async function getWeather(lat, lon, force = false) {
     if (cached) { cached.stale = true; return cached; }
     throw e;
   }
+}
+/* The past week comes from Open-Meteo's historical forecast archive (what the models actually analysed),
+   which is more reliable for "how much did it rain" than the forecast endpoint's past_days. */
+const HIST_API = 'https://historical-forecast-api.open-meteo.com/v1/forecast';
+async function getPastWeek(lat, lon) {
+  const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const end = new Date(), start = new Date(Date.now() - 8 * 86400000);
+  const p = new URLSearchParams({
+    latitude: (+lat).toFixed(4), longitude: (+lon).toFixed(4),
+    timezone: 'auto', timeformat: 'unixtime', wind_speed_unit: 'kmh',
+    start_date: iso(start), end_date: iso(end),
+    hourly: 'precipitation,weather_code,wind_speed_10m,wind_gusts_10m,wind_direction_10m,temperature_2m,apparent_temperature',
+    daily: 'weather_code,precipitation_sum,precipitation_hours,wind_speed_10m_max,wind_gusts_10m_max,wind_direction_10m_dominant,temperature_2m_max,temperature_2m_min',
+  });
+  try {
+    const r = await fetch(`${HIST_API}?${p}`);
+    if (!r.ok) return null;
+    return normalize(await r.json());
+  } catch { return null; }
+}
+function mergePast(data, past) {
+  // replace values for hours/days that have already ended, keeping forecast values elsewhere
+  const now = nowSec();
+  const todayStart = (data.daily.find((x) => dayKey(x.t, data.tz) === dayKey(now, data.tz)) || {}).t ?? now;
+  const merge = (dst, src, until) => {
+    const byT = new Map(src.map((o) => [o.t, o]));
+    for (const o of dst) {
+      if (o.t >= until) continue;
+      const h = byT.get(o.t);
+      if (!h) continue;
+      for (const [k, v] of Object.entries(h)) if (k !== 't' && v != null) o[k] = v;
+    }
+  };
+  merge(data.hourly, past.hourly, now);
+  merge(data.daily, past.daily, todayStart);
+  data.pastSource = 'historical';
 }
 function pruneWxCache() {
   try {
@@ -168,7 +205,7 @@ function normalize(j) {
     m15: zip(j.minutely_15, { p: 'precipitation' }).map((o) => ({ ...o, p: o.p == null ? null : o.p * 4 })), // mm/h
     hourly: zip(j.hourly, {
       p: 'precipitation', prob: 'precipitation_probability', code: 'weather_code', w: 'wind_speed_10m',
-      g: 'wind_gusts_10m', d: 'wind_direction_10m', temp: 'temperature_2m', isDay: 'is_day',
+      g: 'wind_gusts_10m', d: 'wind_direction_10m', temp: 'temperature_2m', feel: 'apparent_temperature', isDay: 'is_day',
     }),
     daily: zip(j.daily, {
       code: 'weather_code', sum: 'precipitation_sum', prob: 'precipitation_probability_max', hours: 'precipitation_hours',
@@ -391,7 +428,7 @@ function renderNow() {
 
   drawNowChart();
   renderNowWind();
-  renderHourStrip();
+  renderTimeline($('#nowTimeline'), d, nowPlace.lat, nowPlace.lon);
 }
 
 function drawNowChart() {
@@ -499,18 +536,192 @@ function renderNowWind() {
     ${why || extra ? `<div class="muted small" style="margin-top:8px">${esc([why, extra].filter(Boolean).join(' · '))}</div>` : ''}`;
 }
 
-function renderHourStrip() {
-  const d = nowData, t0 = nowSec();
-  const hrs = d.hourly.filter((h) => h.t > t0 && h.t <= t0 + 24 * 3600);
-  const colors = { good: css('--good'), meh: css('--meh'), bad: css('--bad'), na: 'transparent' };
-  $('#hourStrip').innerHTML = hrs.map((h) => `
-    <div class="hcell" style="border-top-color:${colors[flyHour(h)]}">
-      <div class="t">${hh(h.t - 3600, d.tz)}</div>
-      <div class="i">${wxIcon(h.code, h.isDay)}</div>
-      <div class="r">${(h.p ?? 0) >= 0.1 ? fmtMM(h.p) + 'mm' : h.prob != null ? h.prob + '%' : '–'}</div>
-      <div class="w">${fmtW(h.w)}<span class="muted">/${fmtW(h.g)}</span></div>
-    </div>`).join('');
+
+/* ---------------- DAY TIMELINE (3-hour columns + rain maps around the spot) ---------------- */
+// The rain maps come from a 7×7 grid of Open-Meteo forecast points, 6 km apart, centred on the spot (≈20 km radius).
+const GRID_N = 7, GRID_KM = 6, GRID_AGE = 30 * 60;
+const gridMem = new Map();
+async function getGrid(lat, lon) {
+  const key = keyOf(lat, lon);
+  const cached = gridMem.get(key) || LS.get('fpvw:grid:' + key, null);
+  if (cached && nowSec() - cached.fetched < GRID_AGE) return cached;
+  const half = (GRID_N - 1) / 2;
+  const dLat = GRID_KM / 111.32, dLon = GRID_KM / (111.32 * Math.cos((lat * Math.PI) / 180));
+  const lats = [], lons = [];
+  for (let r = 0; r < GRID_N; r++) for (let c = 0; c < GRID_N; c++) {
+    lats.push((lat + (half - r) * dLat).toFixed(4)); // row 0 = north
+    lons.push((lon + (c - half) * dLon).toFixed(4));
+  }
+  const p = new URLSearchParams({
+    latitude: lats.join(','), longitude: lons.join(','), hourly: 'precipitation',
+    timezone: 'auto', timeformat: 'unixtime', forecast_days: '7', past_days: '1',
+  });
+  try {
+    const r = await fetch(`${API}?${p}`);
+    if (!r.ok) throw new Error('grid ' + r.status);
+    let j = await r.json();
+    if (!Array.isArray(j)) j = [j];
+    const grid = { fetched: nowSec(), time: j[0].hourly.time, cells: j.map((x) => x.hourly.precipitation) };
+    gridMem.set(key, grid);
+    LS.set('fpvw:grid:' + key, grid);
+    return grid;
+  } catch (e) {
+    if (cached) return cached;
+    throw e;
+  }
 }
+
+function tempColor(t) {
+  if (t == null) return css('--card2');
+  const hue = clamp(180 - t * 5, 0, 235);
+  return `hsl(${hue} 60% ${t > 22 ? 42 : 36}%)`;
+}
+const RAIN_STEPS = [[0.1, '#7cc4f0'], [1, '#3d9be0'], [3, '#2370c2'], [6, '#1d4f9e'], [12, '#3a2f9a'], [25, '#7a2a9c']];
+function rainColor(mm) {
+  let c = null;
+  for (const [v, col] of RAIN_STEPS) if (mm >= v) c = col;
+  return c;
+}
+
+function miniMap(grid, t0, t1, sz = 100) {
+  const cell = sz / GRID_N;
+  let rects = '';
+  if (grid) {
+    const idx = [];
+    grid.time.forEach((t, i) => { if (t > t0 && t <= t1) idx.push(i); });
+    grid.cells.forEach((series, k) => {
+      const mm = idx.reduce((a, i) => a + (series[i] ?? 0), 0);
+      const col = rainColor(mm);
+      if (!col) return;
+      const r = Math.floor(k / GRID_N), c = k % GRID_N;
+      rects += `<rect x="${c * cell}" y="${r * cell}" width="${cell + 0.3}" height="${cell + 0.3}" fill="${col}"/>`;
+    });
+  }
+  const m = sz / 2;
+  return `<svg viewBox="0 0 ${sz} ${sz}" class="mini">
+    <rect width="${sz}" height="${sz}" fill="#3a4350"/>${rects}
+    <g fill="none" stroke="#fff" stroke-opacity=".75" stroke-width="2.2">
+      <circle cx="${m}" cy="${m}" r="${sz * 0.12}"/><circle cx="${m}" cy="${m}" r="${sz * 0.3}"/>
+      <path d="M${m} ${sz * 0.06}V${sz * 0.34}M${m} ${sz * 0.66}V${sz * 0.94}M${sz * 0.06} ${m}H${sz * 0.34}M${sz * 0.66} ${m}H${sz * 0.94}"/>
+    </g>${grid ? '' : `<text x="${m}" y="${m + 6}" text-anchor="middle" fill="#8b949e" font-size="18">…</text>`}</svg>`;
+}
+
+const tlState = new WeakMap();
+function renderTimeline(box, d, lat, lon) {
+  const tz = d.tz;
+  const todayK = dayKey(nowSec(), tz);
+  const ti = d.daily.findIndex((x) => dayKey(x.t, tz) === todayK);
+  const days = d.daily.slice(Math.max(0, ti), Math.max(0, ti) + 7);
+  if (!days.length) { box.innerHTML = ''; return; }
+  let st = tlState.get(box);
+  if (!st || st.key !== keyOf(lat, lon)) { st = { key: keyOf(lat, lon), day: 0, grid: null }; tlState.set(box, st); }
+  st.day = clamp(st.day, 0, days.length - 1);
+
+  const draw = () => {
+    const day = days[st.day];
+    const cols = [];
+    for (let b = 0; b < 8; b++) {
+      const s0 = day.t + b * 10800;
+      const hrs = d.hourly.filter((h) => h.t - 3600 >= s0 && h.t - 3600 < s0 + 10800);
+      if (!hrs.length) continue;
+      const mid = hrs[1] || hrs[0];
+      const sum = hrs.reduce((a, h) => a + (h.p ?? 0), 0);
+      const probs = hrs.map((h) => h.prob).filter((x) => x != null);
+      const ws = hrs.map((h) => h.w ?? 0), gs = hrs.map((h) => h.g ?? 0);
+      const rainy = hrs.filter((h) => (h.p ?? 0) >= 0.1).map((h) => h.code ?? 0);
+      const fly = hrs.map(flyHour);
+      const flyV = fly.includes('bad') ? 'bad' : fly.includes('meh') ? 'meh' : fly.every((v) => v === 'na') ? 'na' : 'good';
+      cols.push({
+        s0, hrs, sum, flyV,
+        code: rainy.length ? Math.max(...rainy) : mid.code, isDay: mid.isDay,
+        temp: mid.temp, feel: mid.feel, dir: mid.d,
+        wmin: Math.min(...ws), wmax: Math.max(...ws), gmax: Math.max(...gs),
+        prob: probs.length ? Math.max(...probs) : null,
+      });
+    }
+    const n = cols.length;
+    const allH = cols.flatMap((c) => c.hrs);
+    const maxP = Math.max(1, ...allH.map((h) => h.p ?? 0));
+    const s = state.settings;
+    const t0 = nowSec();
+    const wCls = (v, lim) => (v > lim ? 'tl-bad' : v > lim * 0.8 ? 'tl-meh' : '');
+    const row = (label, cells, cls = '') => `<div class="tl-l">${label}</div>${cells.map((c) => `<div class="tl-c ${cls}">${c}</div>`).join('')}`;
+    const mmTxt = (v) => (v < 0.1 ? '–' : v < 1 ? '&lt;1' : Math.round(v));
+    const nowCol = cols.findIndex((c) => t0 >= c.s0 && t0 < c.s0 + 10800);
+    const sky = cols.map((c) => c.hrs.map((h) => (h.isDay ? '#8fb8e0' : '#1d3550')));
+    const skyGrad = sky.flat().map((col, i, a) => `${col} ${((i + 0.5) / a.length) * 100}%`).join(',');
+
+    box.innerHTML = `
+      <div class="card-h">Day timeline <span class="muted small">rain map = ${GRID_KM * (GRID_N - 1) / 2 + 2} km around</span></div>
+      <div class="tl-days">${days.map((x, i) => `<button class="${i === st.day ? 'on' : ''}" data-i="${i}">${i === 0 ? 'Today' : fmt(x.t, tz, { weekday: 'short' })}<span>${fmt(x.t, tz, { day: 'numeric' })}</span><i class="dot ${flyDay(d, x).v}"></i></button>`).join('')}</div>
+      <div class="tl-wrap"><div class="tl" style="--n:${n}">
+        <div class="tl-l"></div>${cols.map((c, i) => `<div class="tl-c tl-time ${i === nowCol ? 'now' : ''}">${fmt(c.s0, tz, { hour: '2-digit', hourCycle: 'h23' })}</div>`).join('')}
+        <div class="tl-l"></div><div class="tl-sky" style="grid-column: span ${n}; background: linear-gradient(90deg, ${skyGrad})">${cols.map((c) => `<span>${wxIcon(c.code, c.isDay)}</span>`).join('')}</div>
+        ${row('°C', cols.map((c) => `<b class="tl-temp" style="background:${tempColor(c.temp)}">${c.temp == null ? '–' : Math.round(c.temp) + '°'}</b>`))}
+        ${row('feels', cols.map((c) => (c.feel == null ? '–' : Math.round(c.feel) + '°')), 'muted')}
+        ${row('dir', cols.map((c) => `<span class="tl-dir" style="--r:${((c.dir ?? 0) + 180) % 360}deg">➤</span>${dirName(c.dir)}`), 'small')}
+        ${row(uLabel(), cols.map((c) => `<span class="${wCls(c.wmax, s.wind)}">${fmtW(c.wmin) === fmtW(c.wmax) ? fmtW(c.wmax) : fmtW(c.wmin) + '-' + fmtW(c.wmax)}</span>`))}
+        ${row('gusts', cols.map((c) => `<span class="${wCls(c.gmax, s.gust)}">${fmtW(c.gmax)}</span>`))}
+        ${row('mm', cols.map((c) => `<span class="${c.sum >= 0.1 ? 'tl-rain' : 'muted'}">${mmTxt(c.sum)}</span>`))}
+        ${row('%', cols.map((c) => `<span class="${(c.prob ?? 0) >= 20 ? 'tl-rain' : ''}">${c.prob == null ? '–' : c.prob + '%'}</span>`))}
+        <div class="tl-l">mm/h</div><div class="tl-bars" style="grid-column: span ${n}">${allH.map((h) => {
+          const v = h.p ?? 0, ht = v > 0 ? Math.max(6, Math.sqrt(v / maxP) * 100) : 0;
+          return `<i class="${h.isDay ? '' : 'night'}"><b style="height:${ht}%"></b></i>`;
+        }).join('')}</div>
+        ${row('fly', cols.map((c) => `<i class="tl-fly ${c.flyV}"></i>`))}
+        <div class="tl-l">rain<br>map</div>${cols.map((c, i) => `<div class="tl-c tl-map" data-c="${i}">${miniMap(st.grid, c.s0, c.s0 + 10800)}</div>`).join('')}
+      </div></div>
+      <div class="tl-key small muted"><span>rain over 3 h:</span>${RAIN_STEPS.map(([v, c]) => `<i style="background:${c}"></i>${v}`).join('')}<span>mm</span></div>`;
+    $$('.tl-days button', box).forEach((b) => (b.onclick = () => { st.day = +b.dataset.i; draw(); }));
+    $$('.tl-map', box).forEach((m) => (m.onclick = () => st.grid && openRainMap(st.grid, lat, lon, tz, cols[+m.dataset.c].s0)));
+  };
+  draw();
+  if (!st.grid) getGrid(lat, lon).then((g) => { st.grid = g; if (tlState.get(box) === st && box.isConnected) draw(); }).catch(() => {});
+}
+
+
+/* big rain map: the same grid drawn over a real map, stepping through 3-hour slots */
+const rmap = { map: null, layer: null, grid: null, lat: 0, lon: 0, tz: 'UTC', t: 0 };
+function openRainMap(grid, lat, lon, tz, t) {
+  Object.assign(rmap, { grid, lat, lon, tz, t });
+  openSheet('#rainSheet');
+  requestAnimationFrame(() => {
+    if (!rmap.map) {
+      rmap.map = L.map('rainMap', { zoomControl: false });
+      rmap.map.attributionControl.setPrefix(false);
+      L.tileLayer(TILE_DARK, { maxZoom: 15, className: 'basemap', attribution: '&copy; OpenStreetMap' }).addTo(rmap.map);
+      rmap.layer = L.layerGroup().addTo(rmap.map);
+    }
+    rmap.map.invalidateSize();
+    const half = (GRID_N - 1) / 2 + 0.5;
+    const dLat = GRID_KM / 111.32, dLon = GRID_KM / (111.32 * Math.cos((lat * Math.PI) / 180));
+    rmap.map.fitBounds([[lat - half * dLat, lon - half * dLon], [lat + half * dLat, lon + half * dLon]]);
+    drawRainMap();
+  });
+}
+function drawRainMap() {
+  const { grid, lat, lon, tz, t } = rmap;
+  const half = (GRID_N - 1) / 2;
+  const dLat = GRID_KM / 111.32, dLon = GRID_KM / (111.32 * Math.cos((lat * Math.PI) / 180));
+  rmap.layer.clearLayers();
+  const idx = [];
+  grid.time.forEach((x, i) => { if (x > t && x <= t + 10800) idx.push(i); });
+  grid.cells.forEach((series, k) => {
+    const mm = idx.reduce((a, i) => a + (series[i] ?? 0), 0);
+    const col = rainColor(mm);
+    if (!col) return;
+    const r = Math.floor(k / GRID_N), c = k % GRID_N;
+    const cl = lat + (half - r) * dLat, cn = lon + (c - half) * dLon;
+    L.rectangle([[cl - dLat / 2, cn - dLon / 2], [cl + dLat / 2, cn + dLon / 2]], { stroke: false, fillColor: col, fillOpacity: 0.6 })
+      .bindTooltip(`${fmtMM(mm)} mm`, { direction: 'top' }).addTo(rmap.layer);
+  });
+  L.circleMarker([lat, lon], { radius: 6, color: '#fff', weight: 2, fillColor: '#4aa8ff', fillOpacity: 1 }).addTo(rmap.layer);
+  $('#rainTime').textContent = `${fmt(t, tz, { weekday: 'short' })} ${hhmm(t, tz)}–${hhmm(t + 10800, tz)}`;
+  $('#rainPrev').disabled = !grid.time.some((x) => x <= t);
+  $('#rainNext').disabled = !grid.time.some((x) => x > t + 10800);
+}
+$('#rainPrev').onclick = () => { rmap.t -= 10800; drawRainMap(); };
+$('#rainNext').onclick = () => { rmap.t += 10800; drawRainMap(); };
 
 /* ---------------- SPOTS ---------------- */
 async function renderSpots() {
@@ -561,7 +772,7 @@ async function renderDetail(id) {
   ph.style.backgroundImage = '';
   photoOf(s).then((p) => { if (p && detailSpot === s) ph.style.backgroundImage = `url(${p})`; });
   $('#dToday').innerHTML = '<span class="muted">Loading forecast…</span>';
-  ['#d48', '#dDays', '#dayList'].forEach((q) => ($(q).innerHTML = ''));
+  ['#d48', '#dDays', '#dayList', '#dTimeline'].forEach((q) => ($(q).innerHTML = ''));
   let d;
   try { d = await getWeather(s.lat, s.lon); } catch (e) { $('#dToday').innerHTML = `<span class="muted">Could not load the forecast (${esc(e.message)}).</span>`; return; }
   if (detailSpot !== s) return;
@@ -582,6 +793,7 @@ async function renderDetail(id) {
     </div>
     ${s.notes ? `<div class="notes">${esc(s.notes)}</div>` : ''}`;
 
+  renderTimeline($('#dTimeline'), d, s.lat, s.lon);
   const h48 = d.hourly.filter((h) => h.t > t0 - 3600 && h.t <= t0 + 48 * 3600);
   drawHourly($('#d48'), h48, d.tz, 16);
   drawDaily($('#dDays'), d);
@@ -744,95 +956,8 @@ function renderDayList(d) {
 }
 
 /* ---------------- RADAR ---------------- */
-const radar = { map: null, frames: [], layers: [], idx: 0, timer: null, host: '', markers: null, loadedAt: 0, me: null };
-// OpenStreetMap standard tiles (no key). Darkened with a CSS filter on .basemap so the radar colours stay true.
+// OpenStreetMap standard tiles (no key), darkened with a CSS filter on .basemap.
 const TILE_DARK = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
-const TILE_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
-
-function initRadar() {
-  if (radar.map) { radar.map.invalidateSize(); refreshRadarFrames(); updateRadarMarkers(); return; }
-  const c = nowPlace || state.gps || state.spots[0] || { lat: 46.5, lon: 6.6 };
-  const map = L.map('radarMap', { zoomControl: true, attributionControl: true }).setView([c.lat, c.lon], 8);
-  L.tileLayer(TILE_DARK, { attribution: TILE_ATTR + ' · Radar <a href="https://www.rainviewer.com/">RainViewer</a>', maxZoom: 19, className: 'basemap' }).addTo(map);
-  radar.map = map;
-  radar.markers = L.layerGroup().addTo(map);
-  const lg = L.control({ position: 'topright' });
-  lg.onAdd = () => { const d = L.DomUtil.create('div', 'radar-legend'); d.innerHTML = 'light<i></i>heavy'; return d; };
-  lg.addTo(map);
-  map.on('click', (e) => {
-    const { lat, lng } = e.latlng;
-    const div = document.createElement('div');
-    div.innerHTML = `<div style="margin-bottom:6px" class="small muted">${lat.toFixed(4)}, ${lng.toFixed(4)}</div><button class="btn primary">＋ Add spot here</button>`;
-    $('button', div).onclick = () => { map.closePopup(); openSpotEditor(null, { lat, lon: lng }); };
-    L.popup().setLatLng(e.latlng).setContent(div).openOn(map);
-    $('#radarHint').hidden = true;
-  });
-  updateRadarMarkers();
-  refreshRadarFrames();
-  $('#radarPlay').onclick = () => (radar.timer ? stopRadar() : playRadar());
-  $('#radarSlider').oninput = (e) => { stopRadar(); showFrame(+e.target.value); };
-}
-
-function updateRadarMarkers() {
-  if (!radar.markers) return;
-  radar.markers.clearLayers();
-  const icon = L.divIcon({ className: 'spot-marker', iconSize: [14, 14] });
-  state.spots.forEach((s) => {
-    L.marker([s.lat, s.lon], { icon }).addTo(radar.markers)
-      .bindTooltip(esc(s.name), { permanent: true, direction: 'right', offset: [8, 0], className: 'spot-label' })
-      .on('click', () => (location.hash = '#spot/' + s.id));
-  });
-  if (state.gps) L.circleMarker([state.gps.lat, state.gps.lon], { radius: 6, color: '#fff', weight: 2, fillColor: '#4aa8ff', fillOpacity: 1 }).addTo(radar.markers);
-}
-
-async function refreshRadarFrames() {
-  if (nowSec() - radar.loadedAt < 300 && radar.frames.length) return;
-  try {
-    const r = await fetch('https://api.rainviewer.com/public/weather-maps.json');
-    const j = await r.json();
-    radar.host = j.host;
-    const past = (j.radar && j.radar.past) || [];
-    const cast = ((j.radar && j.radar.nowcast) || []).map((f) => ({ ...f, forecast: true }));
-    radar.layers.forEach((l) => radar.map.removeLayer(l));
-    radar.frames = [...past, ...cast];
-    radar.layers = radar.frames.map((f) => L.tileLayer(`${j.host}${f.path}/256/{z}/{x}/{y}/2/1_1.png`, {
-      tileSize: 256, opacity: 0, zIndex: 10, maxNativeZoom: 7, maxZoom: 18, crossOrigin: true,
-    }));
-    radar.loadedAt = nowSec();
-    const sl = $('#radarSlider');
-    sl.max = Math.max(0, radar.frames.length - 1);
-    showFrame(past.length - 1);
-  } catch (e) {
-    $('#radarTime').textContent = 'offline';
-  }
-}
-
-function showFrame(i) {
-  if (!radar.frames.length) return;
-  i = (i + radar.frames.length) % radar.frames.length;
-  const prev = radar.layers[radar.idx];
-  const cur = radar.layers[i];
-  if (!radar.map.hasLayer(cur)) cur.addTo(radar.map);
-  cur.setOpacity(0.72);
-  if (prev && prev !== cur) prev.setOpacity(0);
-  // preload next frame
-  const nxt = radar.layers[(i + 1) % radar.layers.length];
-  if (nxt && !radar.map.hasLayer(nxt)) nxt.addTo(radar.map);
-  radar.idx = i;
-  $('#radarSlider').value = i;
-  const f = radar.frames[i];
-  const diff = Math.round((f.time - nowSec()) / 60);
-  const rel = Math.abs(diff) < 5 ? 'now' : diff < 0 ? `${diff} min` : `+${diff} min forecast`;
-  $('#radarTime').innerHTML = `${new Date(f.time * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}<small>${rel}</small>`;
-}
-function playRadar() {
-  $('#radarPlay').textContent = '❚❚';
-  radar.timer = setInterval(() => showFrame(radar.idx + 1), 600);
-}
-function stopRadar() {
-  clearInterval(radar.timer); radar.timer = null;
-  $('#radarPlay').textContent = '▶';
-}
 
 /* ---------------- spot editor ---------------- */
 const editor = { map: null, marker: null, spot: null, lat: null, lon: null, photo: undefined };
@@ -931,7 +1056,6 @@ $('#spotSave').onclick = async () => {
   saveSpots();
   closeSheets();
   toast(editor.spot ? 'Spot updated' : 'Spot added');
-  updateRadarMarkers();
   if (location.hash.startsWith('#spot/')) renderDetail(s.id);
   else location.hash = '#spot/' + s.id;
 };
@@ -941,7 +1065,7 @@ $('#spotDelete').onclick = async () => {
   state.spots = state.spots.filter((x) => x !== s);
   saveSpots(); idb.del(s.id); state.photos.delete(s.id);
   if (state.place.type === 'spot' && state.place.id === s.id) { state.place = { type: 'gps' }; savePlace(); }
-  closeSheets(); updateRadarMarkers();
+  closeSheets();
   location.hash = '#spots';
 };
 
@@ -1034,7 +1158,7 @@ $('#importFile').onchange = async (e) => {
       if (i >= 0) state.spots[i] = clean; else state.spots.push(clean);
       n++;
     }
-    saveSpots(); updateRadarMarkers();
+    saveSpots();
     toast(`Imported ${n} spot${n === 1 ? '' : 's'}`);
     closeSheets(); route();
   } catch { toast('That file is not a spots export'); }
@@ -1052,12 +1176,6 @@ $('#addSpotBtn').onclick = () => openSpotEditor();
 $('#backBtn').onclick = () => (history.length > 1 ? history.back() : (location.hash = '#spots'));
 $('#editSpotBtn').onclick = () => detailSpot && openSpotEditor(detailSpot);
 $('#useAsNowBtn').onclick = () => detailSpot && choosePlace({ type: 'spot', id: detailSpot.id });
-$('#showOnRadarBtn').onclick = () => {
-  if (!detailSpot) return;
-  const s = detailSpot;
-  location.hash = '#radar';
-  setTimeout(() => radar.map && radar.map.setView([s.lat, s.lon], 9), 50);
-};
 $('#refreshBtn').onclick = async () => {
   const b = $('#refreshBtn'); b.style.transition = 'transform .6s'; b.style.transform = 'rotate(360deg)';
   setTimeout(() => { b.style.transition = ''; b.style.transform = ''; }, 650);
@@ -1065,22 +1183,19 @@ $('#refreshBtn').onclick = async () => {
   Object.keys(localStorage).filter((k) => k.startsWith('fpvw:wx:')).forEach((k) => {
     const v = LS.get(k); if (v) { v.fetched = 0; LS.set(k, v); }
   });
-  radar.loadedAt = 0;
   route(true);
 };
 
 function route(force = false) {
   const h = location.hash || '#now';
   let view = h.slice(1).split('/')[0] || 'now';
-  if (!['now', 'spots', 'spot', 'radar'].includes(view)) view = 'now';
+  if (!['now', 'spots', 'spot'].includes(view)) view = 'now';
   $$('.view').forEach((v) => v.classList.toggle('active', v.id === 'view-' + view));
   $$('.tabs button').forEach((b) => b.classList.toggle('on', b.dataset.view === (view === 'spot' ? 'spots' : view)));
   $('.top').hidden = view === 'spot';
-  if (view !== 'radar') stopRadar();
   if (view === 'now') { if (force || !nowData || nowSec() - nowData.fetched > MAX_AGE) loadNow(force); else renderNow(); }
   if (view === 'spots') renderSpots();
   if (view === 'spot') renderDetail(h.split('/')[1]);
-  if (view === 'radar') initRadar();
   window.scrollTo(0, 0);
 }
 window.addEventListener('hashchange', () => route());
