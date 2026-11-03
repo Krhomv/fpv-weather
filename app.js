@@ -1182,6 +1182,8 @@ $('#refreshBtn').onclick = async () => {
   const b = $('#refreshBtn'); b.style.transition = 'transform .6s'; b.style.transform = 'rotate(360deg)';
   setTimeout(() => { b.style.transition = ''; b.style.transform = ''; }, 650);
   mem.clear();
+  // also look for a new version of the app; if there is one it installs and the page reloads itself
+  if (navigator.serviceWorker) navigator.serviceWorker.getRegistration().then((r) => r && r.update()).catch(() => {});
   Object.keys(localStorage).filter((k) => k.startsWith('fpvw:wx:')).forEach((k) => {
     const v = LS.get(k); if (v) { v.fetched = 0; LS.set(k, v); }
   });
