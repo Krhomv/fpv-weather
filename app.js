@@ -224,9 +224,9 @@ function hourAt(data, t) {
 function flyHour(h) {
   const s = state.settings;
   if (!h) return 'na';
-  if (s.daylight && h.isDay === 0) return 'na';
   const p = h.p ?? 0, w = h.w ?? 0, g = h.g ?? 0;
-  if (p >= s.rain) return 'rain'; // rain overrides wind: no point checking gusts in the rain
+  if (p >= s.rain) return 'rain'; // rain overrides wind (and shows at night too)
+  if (s.daylight && h.isDay === 0) return 'na';
   if (w > s.wind || g > s.gust) return 'bad';
   if ((h.prob != null && h.prob >= s.prob) || w > s.wind * 0.8 || g > s.gust * 0.8 || p > 0) return 'meh';
   return 'good';
@@ -235,8 +235,8 @@ function flyDay(data, day) {
   const hrs = data.hourly.filter((h) => h.t > day.t && h.t <= day.t + 86400 + 1800);
   let good = 0, meh = 0, bad = 0, rain = 0, counted = 0;
   for (const h of hrs) {
+    if (state.settings.daylight && h.isDay === 0) continue;
     const v = flyHour(h);
-    if (v === 'na') continue;
     counted++;
     if (v === 'good') good++; else if (v === 'meh') meh++; else if (v === 'rain') rain++; else bad++;
   }
