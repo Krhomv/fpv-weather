@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>FPV Weather</title>
+  <meta name="description" content="Rain now, wind and gusts at your FPV spots, and live rain radar.">
+  <meta name="theme-color" content="#0d1117">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="FPV Weather">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <button class="place-btn" id="placeBtn" aria-label="Choose location">
+      <span class="place-pin">◉</span>
+      <span id="placeName">My location</span>
+      <span class="chev">▾</span>
+    </button>
+    <button class="icon-btn" id="refreshBtn" aria-label="Refresh">⟳</button>
+    <button class="icon-btn" id="settingsBtn" aria-label="Settings">⚙</button>
+  </header>
+
+  <main>
+    <!-- NOW -->
+    <section class="view active" id="view-now">
+      <div class="card hero" id="hero">
+        <div class="hero-icon" id="heroIcon">…</div>
+        <div>
+          <div class="hero-title" id="heroTitle">Loading…</div>
+          <div class="hero-sub" id="heroSub"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="seg" id="rangeSeg" role="tablist">
+          <button data-range="1" class="on">1 hour</button>
+          <button data-range="4">4 hours</button>
+          <button data-range="24">24 hours</button>
+        </div>
+        <div class="chart" id="nowChart"></div>
+        <div class="legend">
+          <span><i class="sw sw-rain"></i>Rain (mm/h)</span>
+          <span class="only24"><i class="sw sw-prob"></i>Chance %</span>
+        </div>
+      </div>
+
+      <div class="card" id="nowWind"></div>
+
+      <div class="card">
+        <div class="card-h">Next hours <span class="muted small">tap a spot for 3 weeks</span></div>
+        <div class="hstrip" id="hourStrip"></div>
+      </div>
+      <div class="foot muted small">Data: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> · Radar: <a href="https://www.rainviewer.com/" target="_blank" rel="noopener">RainViewer</a> · <span id="updated"></span></div>
+    </section>
+
+    <!-- SPOTS -->
+    <section class="view" id="view-spots">
+      <div class="spots-head">
+        <h2>Spots</h2>
+        <button class="btn primary" id="addSpotBtn">＋ Add spot</button>
+      </div>
+      <div id="spotList"></div>
+    </section>
+
+    <!-- SPOT DETAIL -->
+    <section class="view" id="view-spot">
+      <div class="detail-photo" id="dPhoto">
+        <button class="icon-btn back" id="backBtn" aria-label="Back">‹</button>
+        <div class="detail-title">
+          <h2 id="dName"></h2>
+          <div class="muted small" id="dCoords"></div>
+        </div>
+        <button class="icon-btn edit" id="editSpotBtn" aria-label="Edit spot">✎</button>
+      </div>
+      <div class="card" id="dToday"></div>
+      <div class="card">
+        <div class="card-h">Next 48 hours</div>
+        <div class="chart scroll" id="d48"></div>
+        <div class="legend">
+          <span><i class="sw sw-rain"></i>Rain mm/h</span>
+          <span><i class="sw sw-wind"></i>Wind</span>
+          <span><i class="sw sw-gust"></i>Gusts</span>
+          <span><i class="sw sw-fly"></i>Flyable</span>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-h">Past week + next 16 days</div>
+        <div class="chart scroll" id="dDays"></div>
+        <div class="legend">
+          <span><i class="sw sw-rain"></i>Rain mm/day</span>
+          <span><i class="sw sw-wind"></i>Max wind</span>
+          <span><i class="sw sw-gust"></i>Max gusts</span>
+        </div>
+      </div>
+      <div class="card nopad">
+        <div class="card-h pad">Day by day <span class="muted small">tap a day for hours</span></div>
+        <div id="dayList"></div>
+      </div>
+      <div class="row-btns">
+        <button class="btn" id="showOnRadarBtn">Show on radar</button>
+        <button class="btn" id="useAsNowBtn">Use on Now tab</button>
+      </div>
+    </section>
+
+    <!-- RADAR -->
+    <section class="view" id="view-radar">
+      <div id="radarMap"></div>
+      <div class="radar-bar">
+        <button class="icon-btn" id="radarPlay" aria-label="Play">▶</button>
+        <input type="range" id="radarSlider" min="0" max="0" value="0" aria-label="Radar time">
+        <div class="radar-time" id="radarTime">--:--</div>
+      </div>
+      <div class="radar-hint" id="radarHint">Tap the map to add a spot there</div>
+    </section>
+  </main>
+
+  <nav class="tabs">
+    <button data-view="now" class="on"><span>☂</span>Now</button>
+    <button data-view="spots"><span>⌖</span>Spots</button>
+    <button data-view="radar"><span>◎</span>Radar</button>
+  </nav>
+
+  <!-- Place picker sheet -->
+  <div class="sheet" id="placeSheet" hidden>
+    <div class="sheet-body">
+      <div class="sheet-h">Show weather for</div>
+      <div id="placeOptions"></div>
+      <button class="btn wide" data-close>Close</button>
+    </div>
+  </div>
+
+  <!-- Spot editor -->
+  <div class="sheet" id="spotSheet" hidden>
+    <div class="sheet-body tall">
+      <div class="sheet-h" id="spotSheetTitle">New spot</div>
+      <label class="field">Name
+        <input id="spotName" placeholder="e.g. Old quarry" maxlength="60">
+      </label>
+      <div class="field">Location <span class="muted small">tap the map to move the pin</span>
+        <div class="search">
+          <input id="spotSearch" placeholder="Search a town or place" autocomplete="off">
+          <button class="btn" id="spotGps" type="button" title="Use my location">◉</button>
+        </div>
+        <div class="search-results" id="spotResults"></div>
+        <div id="spotMap"></div>
+        <div class="muted small" id="spotLatLon"></div>
+      </div>
+      <div class="field">Photo
+        <div class="photo-pick">
+          <img id="spotPhotoPreview" alt="" hidden>
+          <label class="btn">Choose photo<input type="file" id="spotPhoto" accept="image/*" hidden></label>
+          <button class="btn" id="spotPhotoRemove" type="button" hidden>Remove</button>
+        </div>
+      </div>
+      <label class="field">Notes
+        <textarea id="spotNotes" rows="2" placeholder="Parking, obstacles, who to ask…"></textarea>
+      </label>
+      <div class="row-btns">
+        <button class="btn danger" id="spotDelete" hidden>Delete</button>
+        <button class="btn" data-close>Cancel</button>
+        <button class="btn primary" id="spotSave">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings -->
+  <div class="sheet" id="settingsSheet" hidden>
+    <div class="sheet-body">
+      <div class="sheet-h">Settings</div>
+      <label class="field">Wind unit
+        <select id="setUnit">
+          <option value="kmh">km/h</option>
+          <option value="ms">m/s</option>
+          <option value="mph">mph</option>
+          <option value="kn">knots</option>
+        </select>
+      </label>
+      <div class="field">Flyable when…</div>
+      <label class="field inline">Wind below <input type="number" id="setWind" min="1" max="200" step="1"> <span class="unit-l"></span></label>
+      <label class="field inline">Gusts below <input type="number" id="setGust" min="1" max="200" step="1"> <span class="unit-l"></span></label>
+      <label class="field inline">Rain below <input type="number" id="setRain" min="0" max="20" step="0.1"> mm/h</label>
+      <label class="field inline">Rain chance below <input type="number" id="setProb" min="0" max="100" step="5"> %</label>
+      <label class="field inline"><input type="checkbox" id="setDaylight"> Only count daylight hours</label>
+      <div class="row-btns">
+        <button class="btn" id="exportBtn">Export spots</button>
+        <label class="btn">Import<input type="file" id="importFile" accept="application/json,.json" hidden></label>
+      </div>
+      <button class="btn primary wide" id="settingsSave">Done</button>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="vendor/leaflet/leaflet.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
