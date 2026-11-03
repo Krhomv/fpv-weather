@@ -155,12 +155,42 @@ async function getPastWeek(lat, lon) {
     start_date: iso(start), end_date: iso(end),
     hourly: 'precipitation,weather_code,wind_speed_10m,wind_gusts_10m,wind_direction_10m,temperature_2m,apparent_temperature',
     daily: 'weather_code,precipitation_sum,precipitation_hours,wind_speed_10m_max,wind_gusts_10m_max,wind_direction_10m_dominant,temperature_2m_max,temperature_2m_min',
+    models: PAST_MODELS.join(','),
   });
   try {
     const r = await fetch(`${HIST_API}?${p}`);
     if (!r.ok) return null;
-    return normalize(await r.json());
+    return normalize(combineModels(await r.json()));
   } catch { return null; }
+}
+/* Local showers are easy for a single model to miss, so for the past we ask several models
+   and keep the wettest answer for rain; everything else comes from the first model that has it. */
+const PAST_MODELS = ['best_match', 'meteofrance_seamless', 'icon_seamless', 'ecmwf_ifs025', 'gfs_seamless'];
+const MAX_KEYS = new Set(['precipitation', 'precipitation_sum', 'precipitation_hours', 'weather_code']);
+function combineModels(j) {
+  for (const sec of ['hourly', 'daily']) {
+    const o = j[sec];
+    if (!o) continue;
+    const out = { time: o.time };
+    const groups = {};
+    for (const k of Object.keys(o)) {
+      if (k === 'time') continue;
+      const m = PAST_MODELS.find((m) => k.endsWith('_' + m));
+      const base = m ? k.slice(0, -(m.length + 1)) : k;
+      const rank = m ? PAST_MODELS.indexOf(m) : -1;
+      (groups[base] = groups[base] || []).push([rank, o[k]]);
+    }
+    for (const [base, list] of Object.entries(groups)) {
+      list.sort((x, y) => x[0] - y[0]);
+      out[base] = o.time.map((_, i) => {
+        const vals = list.map(([, arr]) => arr[i]).filter((v) => v != null);
+        if (!vals.length) return null;
+        return MAX_KEYS.has(base) ? Math.max(...vals) : vals[0];
+      });
+    }
+    j[sec] = out;
+  }
+  return j;
 }
 function mergePast(data, past) {
   // replace values for hours/days that have already ended, keeping forecast values elsewhere
@@ -225,10 +255,11 @@ function flyHour(h) {
   const s = state.settings;
   if (!h) return 'na';
   const p = h.p ?? 0, w = h.w ?? 0, g = h.g ?? 0;
-  if (p >= s.rain) return 'rain'; // rain overrides wind (and shows at night too)
+  // rain (or a likely chance of it) overrides wind, and shows at night too
+  if (p >= s.rain || (h.prob != null && h.prob >= s.prob)) return 'rain';
   if (s.daylight && h.isDay === 0) return 'na';
   if (w > s.wind || g > s.gust) return 'bad';
-  if ((h.prob != null && h.prob >= s.prob) || w > s.wind * 0.8 || g > s.gust * 0.8 || p > 0) return 'meh';
+  if (w > s.wind * 0.8 || g > s.gust * 0.8 || p > 0) return 'meh';
   return 'good';
 }
 function flyDay(data, day) {
@@ -240,9 +271,10 @@ function flyDay(data, day) {
     counted++;
     if (v === 'good') good++; else if (v === 'meh') meh++; else if (v === 'rain') rain++; else bad++;
   }
-  let v = rain >= bad ? 'rain' : 'bad';
+  let v = 'bad';
   if (!counted) v = 'na';
   else if (good >= 3) v = 'good';
+  else if (rain && rain >= bad) v = 'rain';
   else if (good + meh >= 2) v = 'meh';
   return { v, good, meh, bad, hrs };
 }
@@ -256,10 +288,11 @@ const VERDICT = {
 function whyNot(h) {
   const s = state.settings, r = [];
   if (!h) return '';
+  // rain first: when it rains, the wind doesn't matter
+  if ((h.p ?? 0) >= s.rain) return intensity(h.p);
+  if (h.prob != null && h.prob >= s.prob) return `${h.prob}% rain chance`;
   if ((h.g ?? 0) > s.gust) r.push(`gusts ${fmtW(h.g)} ${uLabel()}`);
   else if ((h.w ?? 0) > s.wind) r.push(`wind ${fmtW(h.w)} ${uLabel()}`);
-  if ((h.p ?? 0) >= s.rain) r.push(intensity(h.p));
-  else if (h.prob != null && h.prob >= s.prob) r.push(`${h.prob}% rain chance`);
   return r.join(', ');
 }
 
@@ -646,7 +679,8 @@ function renderTimeline(box, d, lat, lon) {
     const maxP = Math.max(1, ...allH.map((h) => h.p ?? 0));
     const s = state.settings;
     const t0 = nowSec();
-    const wCls = (v, lim) => (v > lim ? 'tl-bad' : v > lim * 0.8 ? 'tl-meh' : '');
+    // no wind warning colours in rainy slots: rain already rules them out
+    const wCls = (v, lim, c) => (c.flyV === 'rain' ? '' : v > lim ? 'tl-bad' : v > lim * 0.8 ? 'tl-meh' : '');
     const row = (label, cells, cls = '') => `<div class="tl-l">${label}</div>${cells.map((c) => `<div class="tl-c ${cls}">${c}</div>`).join('')}`;
     const mmTxt = (v) => (v < 0.1 ? '–' : v < 1 ? '&lt;1' : Math.round(v));
     const nowCol = cols.findIndex((c) => t0 >= c.s0 && t0 < c.s0 + 10800);
@@ -662,8 +696,8 @@ function renderTimeline(box, d, lat, lon) {
         ${row('°C', cols.map((c) => `<b class="tl-temp" style="background:${tempColor(c.temp)}">${c.temp == null ? '–' : Math.round(c.temp) + '°'}</b>`))}
         ${row('feels', cols.map((c) => (c.feel == null ? '–' : Math.round(c.feel) + '°')), 'muted')}
         ${row('dir', cols.map((c) => `<span class="tl-dir" style="--r:${((c.dir ?? 0) + 180) % 360}deg">➤</span>${dirName(c.dir)}`), 'small')}
-        ${row(uLabel(), cols.map((c) => `<span class="${wCls(c.wmax, s.wind)}">${fmtW(c.wmin) === fmtW(c.wmax) ? fmtW(c.wmax) : fmtW(c.wmin) + '-' + fmtW(c.wmax)}</span>`))}
-        ${row('gusts', cols.map((c) => `<span class="${wCls(c.gmax, s.gust)}">${fmtW(c.gmax)}</span>`))}
+        ${row(uLabel(), cols.map((c) => `<span class="${wCls(c.wmax, s.wind, c)}">${fmtW(c.wmin) === fmtW(c.wmax) ? fmtW(c.wmax) : fmtW(c.wmin) + '-' + fmtW(c.wmax)}</span>`))}
+        ${row('gusts', cols.map((c) => `<span class="${wCls(c.gmax, s.gust, c)}">${fmtW(c.gmax)}</span>`))}
         ${row('mm', cols.map((c) => `<span class="${c.sum >= 0.1 ? 'tl-rain' : 'muted'}">${mmTxt(c.sum)}</span>`))}
         ${row('%', cols.map((c) => `<span class="${(c.prob ?? 0) >= 20 ? 'tl-rain' : ''}">${c.prob == null ? '–' : c.prob + '%'}</span>`))}
         <div class="tl-l">mm/h</div><div class="tl-bars" style="grid-column: span ${n}">${allH.map((h) => {
