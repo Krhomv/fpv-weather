@@ -183,6 +183,7 @@ main { padding: 12px 12px calc(var(--nav-h) + var(--safe-b) + 16px); max-width: 
 .radar-legend { position: absolute; right: 10px; top: 46px; z-index: 600; background: rgba(22,27,34,.9); border: 1px solid var(--line); border-radius: 10px; padding: 6px 8px; font-size: 10px; color: var(--muted); }
 .radar-legend i { display: block; width: 40px; height: 8px; border-radius: 4px; background: linear-gradient(90deg, #88ddee, #0099cc, #0077aa, #005588, #ffee00, #ffaa00, #ff4400, #c10000); margin: 3px 0; }
 .leaflet-container { font: inherit; background: #0b0f14; }
+.basemap { filter: invert(1) hue-rotate(180deg) brightness(.85) contrast(.9) saturate(.6); }
 .leaflet-popup-content-wrapper, .leaflet-popup-tip { background: var(--card); color: var(--text); }
 .leaflet-popup-content { margin: 10px 12px; }
 .leaflet-control-attribution { background: rgba(13,17,23,.7) !important; color: var(--muted) !important; font-size: 9px !important; }

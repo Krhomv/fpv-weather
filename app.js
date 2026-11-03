@@ -745,14 +745,15 @@ function renderDayList(d) {
 
 /* ---------------- RADAR ---------------- */
 const radar = { map: null, frames: [], layers: [], idx: 0, timer: null, host: '', markers: null, loadedAt: 0, me: null };
-const TILE_DARK = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
-const TILE_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a>';
+// OpenStreetMap standard tiles (no key). Darkened with a CSS filter on .basemap so the radar colours stay true.
+const TILE_DARK = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+const TILE_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
 
 function initRadar() {
   if (radar.map) { radar.map.invalidateSize(); refreshRadarFrames(); updateRadarMarkers(); return; }
   const c = nowPlace || state.gps || state.spots[0] || { lat: 46.5, lon: 6.6 };
   const map = L.map('radarMap', { zoomControl: true, attributionControl: true }).setView([c.lat, c.lon], 8);
-  L.tileLayer(TILE_DARK, { attribution: TILE_ATTR + ' · Radar <a href="https://www.rainviewer.com/">RainViewer</a>', subdomains: 'abcd', maxZoom: 18 }).addTo(map);
+  L.tileLayer(TILE_DARK, { attribution: TILE_ATTR + ' · Radar <a href="https://www.rainviewer.com/">RainViewer</a>', maxZoom: 19, className: 'basemap' }).addTo(map);
   radar.map = map;
   radar.markers = L.layerGroup().addTo(map);
   const lg = L.control({ position: 'topright' });
@@ -853,8 +854,9 @@ function openSpotEditor(spot = null, at = null) {
   openSheet('#spotSheet');
   requestAnimationFrame(() => {
     if (!editor.map) {
-      editor.map = L.map('spotMap', { zoomControl: false, attributionControl: false });
-      L.tileLayer(TILE_DARK, { subdomains: 'abcd', maxZoom: 19 }).addTo(editor.map);
+      editor.map = L.map('spotMap', { zoomControl: false });
+      editor.map.attributionControl.setPrefix(false);
+      L.tileLayer(TILE_DARK, { maxZoom: 19, className: 'basemap' }).addTo(editor.map);
       editor.marker = L.marker([c.lat, c.lon], { draggable: true }).addTo(editor.map);
       editor.marker.on('dragend', () => { const p = editor.marker.getLatLng(); setEditorPos(p.lat, p.lng, false); });
       editor.map.on('click', (e) => setEditorPos(e.latlng.lat, e.latlng.lng, false));
@@ -1090,5 +1092,8 @@ window.openSpotEditor = openSpotEditor;
 route();
 
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  const hadController = !!navigator.serviceWorker.controller;
   navigator.serviceWorker.register('sw.js').catch(() => {});
+  // reload once when an updated version takes over, so fixes show up without a manual refresh
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController && !window.__reloaded) { window.__reloaded = true; location.reload(); } });
 }

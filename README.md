@@ -14,7 +14,7 @@ Install it on your phone with "Add to Home screen". Spots, photos and settings s
 - [Open-Meteo](https://open-meteo.com/) forecast and geocoding (CC BY 4.0)
 - [RainViewer](https://www.rainviewer.com/api.html) radar tiles
 - [BigDataCloud](https://www.bigdatacloud.com/) reverse geocoding for the place name
-- Base map © OpenStreetMap contributors © CARTO; map by [Leaflet](https://leafletjs.com/)
+- Base map © OpenStreetMap contributors; map by [Leaflet](https://leafletjs.com/)
 
 ## Hosting
 
