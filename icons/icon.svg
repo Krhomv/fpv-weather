@@ -1,11 +1,54 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="0" fill="#0d1117"/>
-  <circle cx="256" cy="256" r="200" fill="#132238"/>
-  <path d="M150 250c0-48 38-86 86-86 32 0 60 17 75 43 8-3 17-5 26-5 39 0 70 31 70 70 0 3 0 6-1 9 25 6 44 28 44 55 0 31-25 56-56 56H170c-36 0-64-29-64-64 0-33 25-61 57-64-9-4-13-9-13-14z" fill="#e6edf3" transform="translate(0 -40)"/>
-  <g stroke="#3b8cff" stroke-width="22" stroke-linecap="round">
-    <line x1="190" y1="340" x2="176" y2="380"/>
-    <line x1="256" y1="340" x2="242" y2="380"/>
-    <line x1="322" y1="340" x2="308" y2="380"/>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1b3a63"/>
+      <stop offset="1" stop-color="#0b1220"/>
+    </linearGradient>
+    <linearGradient id="cloud" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#c9d6e6"/>
+    </linearGradient>
+    <radialGradient id="prop" cx=".5" cy=".5" r=".5">
+      <stop offset=".55" stop-color="#4aa8ff" stop-opacity="0"/>
+      <stop offset="1" stop-color="#4aa8ff" stop-opacity=".55"/>
+    </radialGradient>
+    <radialGradient id="propF" cx=".5" cy=".5" r=".5">
+      <stop offset=".55" stop-color="#ff7b54" stop-opacity="0"/>
+      <stop offset="1" stop-color="#ff7b54" stop-opacity=".6"/>
+    </radialGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+
+  <!-- cloud -->
+  <path d="M150 238c-30 0-54-24-54-54s24-54 54-54c6 0 11 1 16 2 14-34 47-58 87-58 46 0 84 33 92 77 3 0 5 0 8 0 34 0 62 28 62 62s-28 62-62 62H150z"
+        fill="url(#cloud)" transform="translate(0 -8)"/>
+
+  <!-- rain -->
+  <g stroke="#4aa8ff" stroke-width="16" stroke-linecap="round">
+    <line x1="126" y1="256" x2="114" y2="286"/>
+    <line x1="260" y1="252" x2="252" y2="272"/>
+    <line x1="398" y1="256" x2="386" y2="286"/>
+    <line x1="104" y1="318" x2="96" y2="338" opacity=".6"/>
+    <line x1="418" y1="318" x2="410" y2="338" opacity=".6"/>
   </g>
-  <path d="M120 140 q40 -30 80 0 t80 0" fill="none" stroke="#f5c542" stroke-width="16" stroke-linecap="round"/>
+
+  <!-- quad, top view, front up -->
+  <g transform="translate(256 350)">
+    <g stroke="#e6edf3" stroke-width="16" stroke-linecap="round">
+      <line x1="-62" y1="-50" x2="62" y2="50"/>
+      <line x1="62" y1="-50" x2="-62" y2="50"/>
+    </g>
+    <!-- props: front pair orange -->
+    <circle cx="-66" cy="-54" r="44" fill="url(#propF)" stroke="#ff7b54" stroke-width="5"/>
+    <circle cx="66" cy="-54" r="44" fill="url(#propF)" stroke="#ff7b54" stroke-width="5"/>
+    <circle cx="-66" cy="54" r="44" fill="url(#prop)" stroke="#4aa8ff" stroke-width="5"/>
+    <circle cx="66" cy="54" r="44" fill="url(#prop)" stroke="#4aa8ff" stroke-width="5"/>
+    <g fill="#e6edf3">
+      <circle cx="-66" cy="-54" r="10"/><circle cx="66" cy="-54" r="10"/>
+      <circle cx="-66" cy="54" r="10"/><circle cx="66" cy="54" r="10"/>
+    </g>
+    <!-- body + camera -->
+    <rect x="-26" y="-38" width="52" height="76" rx="14" fill="#f5c542"/>
+    <circle cx="0" cy="-22" r="9" fill="#0b1220"/>
+  </g>
 </svg>
